@@ -35,7 +35,7 @@ Use the terraform scripts to create your cluster with the required nodepools:
 - [AWS EKS](./docs/eks.md)
 - [Google Cloud GKE](./docs/gke.md)
 - [Azure AKS](./docs/aks.md)
-- [Exoscale SKS](./docs/exoscale.md)
+- [Exoscale SKS](./docs/sks.md)
 
 ## Provision the Cluster
 
@@ -81,7 +81,7 @@ After installing traefik and jambonz, you need to configure DNS records pointing
 - [AWS EKS DNS Setup](./docs/eks.md#setting-up-dns)
 - [Google Cloud GKE DNS Setup](./docs/gke.md#setting-up-dns)
 - [Azure AKS DNS Setup](./docs/aks.md#setting-up-dns)
-- [Exoscale SKS DNS Setup](./docs/exoscale.md#setting-up-dns)
+- [Exoscale SKS DNS Setup](./docs/sks.md#setting-up-dns)
 
 ## Securing the Web Portals (HTTPS)
 

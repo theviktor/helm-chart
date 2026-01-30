@@ -12,7 +12,7 @@
 
 Use the terraform scripts to create an SKS cluster with the required nodepools:
 
-https://github.com/jambonz-selfhosting/terraform/tree/main/exoscale
+https://github.com/jambonz-selfhosting/terraform/tree/main/exoscale/provision-sks-cluster
 
 The terraform will create:
 - SKS cluster with default nodepool
