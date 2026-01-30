@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sbc-inbound
+  labels:
+    app: sbc-inbound
+{{ include "common.labels" . | indent 4 }}
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  replicas: {{ default 1 .Values.sbcInbound.replicas }}
+  selector:
+    matchLabels:
+      app: sbc-inbound
+  template:
+    metadata:
+      labels:
+        app: sbc-inbound
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.sbcInbound.podAnnotations }}
+        {{ toYaml .Values.sbcInbound.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.global.affinity }}
+      affinity:
+        {{ toYaml .Values.global.affinity | default "" | nindent 8 }}
+      {{- end }}
+      {{- if .Values.sbcInbound.nodeSelector }}
+      nodeSelector:
+        {{ .Values.sbcInbound.nodeSelector.label }}: {{ .Values.sbcInbound.nodeSelector.value | quote }}      
+      {{- end }}   
+      containers:
+        - name: sbc-inbound
+          image: {{ .Values.sbcInbound.image }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.sbcInbound.imagePullPolicy }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "/opt/app/bin/k8s-pre-stop-hook.js"]
+          livenessProbe:
+            httpGet:
+              path: /system-health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          startupProbe:
+            httpGet:
+              path: /system-health
+              port: 3000
+            failureThreshold: 40
+            periodSeconds: 10
+          ports:
+            - name: dtmf
+              containerPort: 22224
+              protocol: UDP
+            - name: health
+              containerPort: 3000
+              protocol: UDP
+            - name: drachtio
+              containerPort: {{ .Values.sbcInbound.drachtioPort }}
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: K8S 
+              value: "1"
+            - name: JAMBONES_TRACK_SP_CALLS
+              value: {{ default "0" .Values.global.track.serviceProviderCalls | quote }}
+            - name: JAMBONES_TRACK_ACCOUNT_CALLS
+              value: {{ default "0" .Values.global.track.accountCalls | quote }}
+            - name: JAMBONES_TRACK_APP_CALLS
+              value: {{ default "0" .Values.global.track.applicationCalls | quote }}
+            - name: JAMBONES_LOGLEVEL
+              value: debug
+            - name: DTMF_LISTEN_PORT
+              value: "22224"
+            - name: K8S_FEATURE_SERVER_SERVICE_NAME 
+              value: "feature-server"
+            - name: K8S_RTPENGINE_SERVICE_NAME 
+              value: "rtpengine-ng:22222"
+            - name: JAMBONES_TIME_SERIES_HOST 
+              value: influxdb.{{ .Release.Namespace  }}
+            - name: JAMBONES_REDIS_HOST
+              value: redis.{{ .Release.Namespace  }}
+            - name: JAMBONES_REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: ENABLE_METRICS
+              value: {{ default "0" .Values.stats.enabled  | quote }}
+            {{- if .Values.stats.enabled }}
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STATS_HOST
+              value: {{ .Values.stats.host }}.{{ .Release.Namespace  }}
+            - name: STATS_PORT
+              value: {{ .Values.stats.port  | quote }}
+            - name: STATS_TAGS
+              value: "pod:$(K8S_POD_NAME)"
+            - name: STATS_PROTOCOL
+              value: {{ .Values.stats.protocol }}
+            - name: STATS_TELEGRAF
+              value: "1"
+            - name: STATS_SAMPLE_RATE
+              value:  {{ .Values.stats.sampleRate | quote }}
+            {{- end }}
+            - name: JAMBONES_MYSQL_DATABASE
+              value: {{ .Values.mysql.database }}
+            - name: JAMBONES_MYSQL_HOST
+              value: mysql.{{ .Release.Namespace  }}
+            - name: JAMBONES_MYSQL_USER
+              value: {{ .Values.mysql.user }}
+            - name: JAMBONES_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+            - name: DRACHTIO_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: DRACHTIO_SECRET
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: JWT_SECRET
+            - name: DRACHTIO_PORT
+              value: {{ .Values.sbcInbound.drachtioPort | quote }}
+      terminationGracePeriodSeconds: 900

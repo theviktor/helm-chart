@@ -1,0 +1,315 @@
+global:
+  # if defined, create and/or reference db and monitoring services in the specified namespace;
+  # otherwise they create and/or referenced them in whatever the .Release namespace is
+  db:
+  traefik:
+    tls:
+      enabled: false
+      clusterIssuer: letsencrypt-prod
+      email: daveh@drachtio.org
+  cassandra:
+    enabled: true
+  recordings:
+    enabled: false
+  track:
+    serviceProviderCalls: "0"
+    accountCalls: "0"
+    appCalls: "0"
+  affinity:
+  podAnnotations:
+
+db: 
+  mysql: 
+    secret: amFtYm9uZXM=
+monitoring: 
+  postgres: 
+    secret: amFtYm9uZXM=
+
+# (required) name of cloud provider: azure, aws, gcp, exoscale, or none 
+cloud:
+
+# set this to "1" if you are deploying on AWS and you are using IMDSv2
+awsUseIMDSv2: "1"
+
+# set this to true if you are deploying on Azure AKS and you are using IMDSv2
+aksUseIMDSv2: true
+
+jwt:
+  secret: Rz11JS05NyNUZmZZZg==
+
+# basic information that applies to all jambonz Node.js app
+jambonz: 
+  # a short identifier for the cluster, needed if multiple jambonz clusters will share the same redis
+  clusterId: 
+
+# these values direct which nodepool the SBC sip and rtp pods will be placed in.
+# these pods have to be in special nodepools that use host network binding due to the nature
+# of sip signaling and the current lack of support for sip in ingress controllers.
+#
+#   Note: if you want to put sip and rtp into a single nodepool (e.g. to save cost on a smaller deployment)
+#   then set both labels below to the same value and both tolerations below to the same value  
+#   and use those values when creating your single edge-facing nodepool when you spin up the cluster.
+#   (But, for production deployments, separate nodepools are recommended for sip and rtp, and this is the default setup below).
+sbc: 
+  # aws only
+  # update the "cluster-name" below with the cluster name created by the terraform-eks script
+  ec2EipAllocator: 
+    enabled: false
+    image: jambonz/ec2-eip-allocator:latest
+    rtpEipGroupRoleKey: role
+    rtpEipGroupRole: cluster-name-rtp-node
+    sipEipGroupRoleKey: role
+    sipEipGroupRole: cluster-name-sip-node
+  sip: 
+    nodeSelector: 
+      label: voip-environment 
+      value: sip
+    toleration: sip
+    podAnnotations:
+    ssl:
+      # this is for sip over tls only, not for https to to web portals - for that, look at global.traefik.tls.enabled above
+      enabled: false
+      hostname:
+      ## Add Custom CA certificate. A tls type secret named "drachtio-secret" will be created based on the values of tls.crt and tls.key
+      ## Careful with the indentation
+      ## For more information, see https://helm.sh/docs/chart_template_guide/yaml_techniques/#strings-in-yaml
+      ##
+      ## Custom CA certificate in plaintext, not base64 encoded.
+      ## Example:
+      ##   crt: |
+      ##     -----BEGIN CERTIFICATE-----
+      ##     -----END CERTIFICATE-----
+      crt: ""
+      ## CA certificate private key in plaintext, not base64 encoded.
+      ## Example:
+      ## key: |
+      ##   -----BEGIN PRIVATE KEY-----
+      ##   -----END PRIVATE KEY-----
+      key: ""
+  rtp: 
+    nodeSelector: 
+      label: voip-environment 
+      value: rtp
+    toleration: rtp
+    podAnnotations:
+    storageClassName:
+    # list of extra initContainers
+    extraInitContainers:
+    # list of extra containers/sidecars
+    extraContainers:
+    # list of extra volumes
+    extraVolumes:
+    statefulset:
+      # enable it only if the recordings are also enabled
+      enabled: false
+      # match this value with the number of jambonz-rtp nodes
+      replicas: 1
+
+# information used by the Node.js apps to write statsd to a telegraf listening instance
+stats: 
+  enabled: "1"
+  host: telegraf
+  port: "8125"
+  protocol: tcp 
+  telegraf: "1"
+  sampleRate: "1"
+
+# configuration information for rtpengine
+rtpengine:
+  image: jambonz/rtpengine:0.1.14
+  imagePullPolicy: IfNotPresent
+  sidecarImage: jambonz/rtpengine-sidecar:0.9.5-11
+  sidecarImagePullPolicy: IfNotPresent
+  dtmfLogPort:  "22223"
+  loglevel: "9"
+  homerId: "11"
+  # used when global.recordings.enabled is true
+  recordings:
+    pvc: recordings-shared-volume
+    dir: /recordings
+    method: pcap
+    storage: 10Gi
+
+# used by sidecar apps in sbc-sip and feature-server to connect locally to drachtio server
+drachtio:
+  image: jambonz/drachtio-server:10.0.5
+  imagePullPolicy: IfNotPresent
+  host: "127.0.0.1"
+  port: "9022"
+  homerId: "10"
+  secret: Y3ltcnU=
+
+# freeswitch configuration
+freeswitch:
+  image: jambonz/jambonz-freeswitch:10.1.0
+  imagePullPolicy: IfNotPresent
+  args:
+    - freeswitch
+    - --codec-answer-generous
+
+# configuration for jambonz-api-server
+api:
+  image: jambonz/api-server:10.0.3
+  imagePullPolicy: IfNotPresent
+  httpPort: "3000"
+  replicas: 1
+  podAnnotations:
+  # (required) hostname for the jambonz port ingress
+  hostname:
+  # defaults to http, if you have tls enabled change to https 
+  # otherwise web to api connection will fail
+  protocol:
+
+dbUpgrade:
+  image: jambonz/db-create:10.0.3
+  imagePullPolicy: IfNotPresent
+
+# jambonz-webapp configuration
+webapp:
+  image: jambonz/webapp:10.0.3
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  podAnnotations:
+  
+  # (required) hostname for the jambonz port ingress
+  hostname:
+
+  # set to true to disable recording in the portal
+  disableRecording: false 
+
+# sbc-inbound configuration
+sbcInbound:
+  image: jambonz/inbound:10.0.3
+  imagePullPolicy: IfNotPresent
+  drachtioPort: "4000"
+  replicas: 1
+  podAnnotations:
+
+# sbc-outbound configuration
+sbcOutbound:
+  image: jambonz/outbound:10.0.3
+  imagePullPolicy: IfNotPresent
+  drachtioPort: "4000"
+  replicas: 1
+  podAnnotations:
+
+# sbc-sip-sidecar configuration
+sbcSipSidecar:
+  image: jambonz/sbc-sip-sidecar:0.9.5-11
+  imagePullPolicy: IfNotPresent
+
+# sbc-call-router configuration
+sbcCallRouter:
+  image: jambonz/sbc-call-router:0.9.5-11
+  imagePullPolicy: IfNotPresent
+  httpPort: "3000"
+  replicas: 1
+
+# feature-server configuration
+featureServer:
+  image: jambonz/feature-server:10.0.3
+  imagePullPolicy: IfNotPresent
+  httpPort: "3000"
+  drachtioConnection: "127.0.0.1:9022:cymru"
+  freeswitchConnection: "127.0.0.1:8021:JambonzR0ck$"
+  replicas: 3
+  otelSampleRate: 1.0
+  podAnnotations:
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+# sbc-sip configuration
+sbcSip: 
+  loglevel: debug 
+  sofiaLoglevel: "9"
+
+# sidecar to wait for database up
+dbWaiter:
+  image: d3fk/kubectl:v1.18
+
+# if you want to block bad sip actors, get an api key from apiban.org and put it below
+apiban: 
+  apiKey: 
+  redisKey: "apiban:ips"
+  refreshInterval: "3600"
+  foreverBlockRanges: "128.90.0.0/16,162.142.125.0/24,198.235.24.0/24,205.210.31.0/24"
+  podAnnotations:
+
+grafana:
+  image: grafana/grafana-oss:10.3.3 
+  hostname:
+  storage: 10Gi
+  podAnnotations:
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://loki-stack.logging.svc.cluster.local:3100
+          isDefault: false
+          jsonData:
+            maxLines: 1000
+            
+heplifyServer: 
+  image: sipcapture/heplify-server:latest
+  podAnnotations:
+influxdb: 
+  image: influxdb:1.8
+  loglevel: info
+  storage: 30Gi
+  podAnnotations:
+cassandra:
+  image: cassandra:3.11
+  keyspace: jaeger_v1_dc1
+  storage: 30Gi
+  podAnnotations:
+homer: 
+  image: sipcapture/webapp:latest
+  hostname:
+  podAnnotations:
+postgres: 
+  image: postgres:11-alpine
+  user: cm9vdA==
+  secret: aG9tZXJTZXZlbg==
+  storage: 30Gi 
+  podAnnotations:
+telegraf: 
+  image: telegraf:1.19
+  podAnnotations:
+jaegerCollector:
+  image: jaegertracing/jaeger-collector:1.46
+  podAnnotations:
+jaegerQuery:
+  image: jaegertracing/jaeger-query:1.46
+  podAnnotations:
+
+# Storage Class definition for the Stateful Sets
+storageClassName:
+
+# Affinity
+affinity:
+
+mysql: 
+  image: mysql:5.7
+  host: mysql 
+  database: jambones
+  user: jambones 
+  storage: 10Gi
+  # if empty, an empty password is used for the root user using MYSQL_ALLOW_EMPTY_PASSWORD
+  rootSecret:
+  secret: amFtYm9uZXM=
+  podAnnotations:
+
+# redis configuration used by Node.js app that need to connect
+redis: 
+  image: redis:alpine
+  host: redis 
+  port: "6379"
+  podAnnotations:

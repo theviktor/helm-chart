@@ -1,0 +1,22 @@
+# Environment-specific values files (contain secrets and deployment-specific config)
+values-*.yaml
+
+# Helm package artifacts
+*.tgz
+charts/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Claude Code local settings
+.claude/
+
+# OS files
+.DS_Store
+
+# Backup files
+*.swp
+*.bak
+*.tmp
+*~

@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: homer-ingress
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "common.labels" . | indent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.priority: "-10"
+{{- if .Values.global.traefik.tls.enabled }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    cert-manager.io/cluster-issuer: {{ .Values.global.traefik.tls.clusterIssuer }}
+{{- else }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+{{- end }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ required "hostname for the homer portal" .Values.homer.hostname }}
+      http:
+        paths:
+        - backend:
+            service:
+              name: homer-webapp
+              port: 
+                number: 80
+          path: /
+          pathType: Prefix
+{{- if .Values.global.traefik.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ required "hostname for the web port" .Values.homer.hostname }}
+    secretName: jambonz-homer-tls
+{{- end }}

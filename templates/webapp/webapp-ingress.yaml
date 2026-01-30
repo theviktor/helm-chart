@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webapp
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "common.labels" . | indent 4 }}
+  annotations:
+{{- if .Values.global.traefik.tls.enabled }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    cert-manager.io/cluster-issuer: {{ .Values.global.traefik.tls.clusterIssuer }}
+{{- else }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+{{- end }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ required "hostname for the web port" .Values.webapp.hostname }}
+      http:
+        paths:
+        - backend:
+            service:
+              name: webapp
+              port: 
+                number: 3001
+          path: /
+          pathType: Prefix
+{{- if .Values.global.traefik.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ required "hostname for the web port" .Values.webapp.hostname }}
+    secretName: jambonz-webapp-tls
+{{- end }}

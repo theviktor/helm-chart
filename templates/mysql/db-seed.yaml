@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-seed-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "common.labels" . | indent 4 }}
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.mysql.podAnnotations }}
+        {{ toYaml .Values.mysql.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.mysql.nodeSelector }}
+      nodeSelector:
+        {{ .Values.mysql.nodeSelector.label }}: {{ .Values.mysql.nodeSelector.value | quote }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-schema
+          image: mysql:5.7
+          command:
+            - '/bin/sh'
+            - '-c'
+            - 'until mysql -h {{ .Values.mysql.host }} -u {{ .Values.mysql.user }} -p${MYSQL_PASSWORD} {{ .Values.mysql.database }} -e "SELECT 1 FROM accounts LIMIT 1" 2>/dev/null; do echo "Waiting for schema..."; sleep 5; done'
+          env:
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+      containers:
+        - name: db-seed
+          image: mysql:5.7
+          command:
+            - 'sh'
+            - '-c'
+            - |
+              echo "Seeding system_information: domain_name={{ .Values.webapp.hostname }}, sip_domain_name=sip.{{ .Values.webapp.hostname }}, monitoring_domain_name={{ .Values.grafana.hostname }}"
+              mysql -h ${MYSQL_HOST} -u ${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE} -e "
+                INSERT INTO system_information (domain_name, sip_domain_name, monitoring_domain_name, log_level)
+                SELECT '{{ .Values.webapp.hostname }}', 'sip.{{ .Values.webapp.hostname }}', '{{ .Values.grafana.hostname }}', 'info'
+                WHERE NOT EXISTS (SELECT 1 FROM system_information LIMIT 1);
+              "
+          env:
+            - name: MYSQL_HOST
+              value: {{ .Values.mysql.host }}
+            - name: MYSQL_DATABASE
+              value: {{ .Values.mysql.database }}
+            - name: MYSQL_USER
+              value: {{ .Values.mysql.user }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+      restartPolicy: OnFailure

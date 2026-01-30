@@ -1,0 +1,39 @@
+{{- if .Values.global.cassandra.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger-query
+  labels:
+    app: jaeger-query
+{{ include "common.labels" . | indent 4 }}
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger-query
+  template:
+    metadata:
+      labels:
+        app: jaeger-query
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.jaegerQuery.podAnnotations }}
+        {{ toYaml .Values.jaegerQuery.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      containers:
+      - name: jaeger-query
+        image: {{ .Values.jaegerQuery.image }}
+        args: ["--log-level=info", "--cassandra.servers=cassandra:9042"]
+        env:
+        - name: CASSANDRA_KEYSPACE
+          value: {{ .Values.cassandra.keyspace }}
+        - name: JAEGER_AGENT_PORT
+          value: "6831"
+        ports:
+          - containerPort: 16686
+            name: query-port
+{{- end}}

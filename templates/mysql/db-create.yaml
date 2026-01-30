@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-create-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "common.labels" . | indent 4 }}
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.mysql.podAnnotations }}
+        {{ toYaml .Values.mysql.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.mysql.nodeSelector }}
+      nodeSelector:
+        {{ .Values.mysql.nodeSelector.label }}: {{ .Values.mysql.nodeSelector.value | quote }}      
+      {{- end }}
+      containers:
+        - name: db 
+          image: {{ .Values.dbUpgrade.image }}
+          imagePullPolicy: {{ .Values.dbUpgrade.imagePullPolicy }}
+          env:
+            - name: JAMBONES_MYSQL_HOST
+              value: {{ .Values.mysql.host }}
+            - name: JAMBONES_MYSQL_DATABASE
+              value: {{ .Values.mysql.database }}
+            - name: JAMBONES_MYSQL_USER
+              value: {{ .Values.mysql.user }}
+            - name: JAMBONES_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: JWT_SECRET
+          imagePullPolicy: Always
+      restartPolicy: OnFailure

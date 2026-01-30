@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: mysql
+{{ include "common.labels" . | indent 4 }}
+  name: mysql
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      name: mysql
+      labels:
+        app: mysql
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.mysql.podAnnotations }}
+        {{ toYaml .Values.mysql.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.affinity }}
+      affinity:
+        {{ toYaml .Values.affinity | default "" | nindent 8 }}
+      {{- end }}
+      {{- if .Values.mysql.nodeSelector }}
+      nodeSelector:
+        {{ .Values.mysql.nodeSelector.label }}: {{ .Values.mysql.nodeSelector.value | quote }}      
+      {{- end }}
+      containers:
+        - name: mysql 
+          image: {{ .Values.mysql.image }}
+          args:
+            - "--ignore-db-dir=lost+found"
+          env:
+            {{- if .Values.mysql.rootSecret }}
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_PWD # For healthcheck
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_ROOT_PASSWORD
+            {{- else }}
+            - name: MYSQL_ALLOW_EMPTY_PASSWORD
+              value: "yes"
+            {{- end }}
+            - name: MYSQL_DATABASE
+              value: {{ .Values.mysql.database }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_USER
+              value: {{ .Values.mysql.user }}
+          livenessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - 127.0.0.1
+                - --protocol
+                - tcp
+            failureThreshold: 10
+            timeoutSeconds: 5
+          ports:
+            - containerPort: 3306
+          resources: {}
+          volumeMounts:
+            - mountPath: /var/lib/mysql
+              name: mysql-claim
+      restartPolicy: Always
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-claim
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      {{- if .Values.storageClassName }}
+      storageClassName: {{ .Values.storageClassName }}
+      {{- end }}
+      resources:
+        requests:
+          storage: 10Gi

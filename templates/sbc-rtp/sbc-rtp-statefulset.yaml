@@ -1,0 +1,175 @@
+{{- if .Values.sbc.rtp.statefulset.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  namespace: {{ .Release.Namespace | quote }}
+  name: jambonz-sbc-rtp
+  labels:
+    app: jambonz-sbc-rtp
+{{ include "common.labels" . | indent 4 }}
+  annotations:
+    "cluster-autoscaler.kubernetes.io/safe-to-evict": "true"
+spec:
+  serviceName: jambonz-sbc-rtp
+  replicas: {{ .Values.sbc.rtp.statefulset.replicas }}
+  selector:
+    matchLabels:
+      app: jambonz-sbc-rtp
+  template:
+    metadata:
+      labels:
+        app: jambonz-sbc-rtp
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.sbc.rtp.podAnnotations }}
+        {{ toYaml .Values.sbc.rtp.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.global.affinity }}
+      affinity:
+        {{ toYaml .Values.global.affinity | default "" | nindent 8 }}
+      {{- end }}
+      nodeSelector:
+        {{ .Values.sbc.rtp.nodeSelector.label }}: {{.Values.sbc.rtp.nodeSelector.value | quote }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: {{ .Values.sbc.rtp.toleration | quote }}
+          operator: "Exists"
+          effect: "NoSchedule"
+{{- if .Values.sbc.rtp.serviceAccountName }}
+      serviceAccountName: {{ .Values.sbc.rtp.serviceAccountName | quote }}
+{{- end }}
+      volumes:
+{{- if .Values.sbc.rtp.extraVolumes }}
+{{ toYaml .Values.sbc.rtp.extraVolumes | default "" | nindent 8 }}
+{{- end }}
+      initContainers:
+        {{- if and (.Values.sbc.ec2EipAllocator.enabled) (eq .Values.cloud "aws") }}
+        - name: ec2-eip-allocator
+          image: {{ .Values.sbc.ec2EipAllocator.image }}
+          securityContext:
+            privileged: true
+          env:
+            - name: AWS_EIP_NODE_GROUP_ROLE_KEY
+              value: {{ .Values.sbc.ec2EipAllocator.rtpEipGroupRoleKey }}
+            - name: AWS_EIP_NODE_GROUP_ROLE
+              value: {{ .Values.sbc.ec2EipAllocator.rtpEipGroupRole }}
+        {{- end }}
+        - image: kanisterio/mysql-sidecar:0.40.0
+          name: db-create-wait
+          command:
+            - sh 
+            - -c 
+            - |
+              until mysql -u {{ .Values.mysql.user }} -D {{ .Values.mysql.database }} -h mysql.{{ .Release.Namespace  }} -p${MYSQL_PASSWORD} --protocol=tcp -e "select count(*) from accounts";
+              do 
+                sleep 5
+              done
+          env:
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+{{- if .Values.sbc.rtp.extraInitContainers }}
+{{ toYaml .Values.sbc.rtp.extraInitContainers | default "" | nindent 8 }}
+{{- end }}
+      containers:
+        - name: rtpengine-sidecar
+          image: {{ .Values.rtpengine.sidecarImage }}
+          imagePullPolicy:  {{ .Values.rtpengine.sidecarImagePullPolicy }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: K8S 
+              value: "1"
+            - name: JAMBONES_LOGLEVEL
+              value: debug
+            - name: JAMBONES_REDIS_HOST
+              value: redis.{{ .Release.Namespace  }}
+            - name: JAMBONES_REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: RTPENGINE_DTMF_LOG_PORT
+              value: {{ .Values.rtpengine.dtmfLogPort | quote }}
+            - name: RTPENGINE_URL
+              value: {{ .Values.rtpengine.wsUrl | quote }}
+            - name: ENABLE_METRICS
+              value: {{ default "0" .Values.stats.enabled  | quote }}
+            {{- if .Values.stats.enabled }}
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STATS_HOST
+              value: {{ .Values.stats.host }}.{{ .Release.Namespace  }}
+            - name: STATS_PORT
+              value: {{ .Values.stats.port  | quote }}
+            - name: STATS_TAGS
+              value: "pod:$(K8S_POD_NAME)"
+            - name: STATS_PROTOCOL
+              value: {{ .Values.stats.protocol }}
+            - name: STATS_TELEGRAF
+              value: "1"
+            - name: STATS_SAMPLE_RATE
+              value:  {{ .Values.stats.sampleRate | quote }}
+            {{- end }}
+        - name: rtpengine 
+          image: {{ .Values.rtpengine.image }}
+          imagePullPolicy: {{ .Values.rtpengine.imagePullPolicy }}
+          args: 
+            - rtpengine
+            - --listen-udp=22222
+            - --listen-http=22222
+            - --homer
+            - heplify-server.{{ .Release.Namespace  }}:9060
+            - --homer-protocol
+            - udp
+            - --homer-id
+            - {{ .Values.rtpengine.homerId | quote }}
+            - --log-level
+            - {{ default 5 .Values.rtpengine.loglevel | quote }}
+            {{- if .Values.global.recordings.enabled }}
+            - --recording-method
+            - {{ .Values.rtpengine.recordings.method }}
+            - --recording-dir
+            - {{ .Values.rtpengine.recordings.dir | quote }}
+            {{- end }}
+          env:
+            - name: CLOUD 
+              value: {{ required "cloud provider name" .Values.cloud | quote }}
+            - name: IMDSv2
+              value: {{ .Values.awsUseIMDSv2 | quote }}
+            - name: DRACHTIO_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: DRACHTIO_SECRET
+          {{- if .Values.global.recordings.enabled }}
+          volumeMounts:
+            - mountPath: {{ .Values.rtpengine.recordings.dir | quote }}
+              name: recordings
+          {{- end }}
+          ports:
+            - containerPort: 22222
+              protocol: TCP
+{{- if .Values.sbc.rtp.extraContainers }}
+{{ toYaml .Values.sbc.rtp.extraContainers | default "" | nindent 8 }}
+{{- end }}
+      restartPolicy: Always
+  {{- if .Values.global.recordings.enabled }}
+  volumeClaimTemplates:
+  - metadata:
+      name: recordings
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      {{- if .Values.sbc.rtp.storageClassName }}
+      storageClassName: {{ .Values.sbc.rtp.storageClassName }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.rtpengine.recordings.storage }}
+  {{- end }}
+{{- end }}

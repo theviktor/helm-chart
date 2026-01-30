@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-server
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+{{ include "common.labels" . | indent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.priority: "-10"
+{{- if .Values.global.traefik.tls.enabled }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    cert-manager.io/cluster-issuer: {{ .Values.global.traefik.tls.clusterIssuer }}
+{{- else }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+{{- end }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ required "hostname for the REST API" .Values.api.hostname }}
+      http:
+        paths:
+        - backend:
+            service:
+              name: api-server
+              port: 
+                number:  {{ .Values.api.httpPort }}
+          path: /
+          pathType: Prefix
+{{- if .Values.global.traefik.tls.enabled }}
+  tls:
+  - hosts:
+    - {{ required "hostname for the api-server" .Values.api.hostname }}
+    secretName: jambonz-api-tls
+{{- end }}

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: redis
+{{ include "common.labels" . | indent 4 }}
+  name: redis
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      name: redis
+      labels:
+        app: redis
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.redis.podAnnotations }}
+        {{ toYaml .Values.redis.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.affinity }}
+      affinity:
+        {{ toYaml .Values.affinity | default "" | nindent 8 }}
+      {{- end }}
+      {{- if .Values.redis.nodeSelector }}
+      nodeSelector:
+        {{ .Values.redis.nodeSelector.label }}: {{ .Values.redis.nodeSelector.value | quote }}      
+      {{- end }}
+      containers:
+        - name: redis 
+          image: {{ .Values.redis.image }}
+          ports:
+            - containerPort: 6379
+          resources: {}
+      restartPolicy: Always

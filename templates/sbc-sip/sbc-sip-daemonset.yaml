@@ -1,0 +1,235 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  namespace: {{ .Release.Namespace | quote }}
+  name: jambonz-sbc-sip
+  labels:
+    app: jambonz-sbc-sip
+{{ include "common.labels" . | indent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: jambonz-sbc-sip
+  template:
+    metadata:
+      labels:
+        app: jambonz-sbc-sip
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.sbc.sip.podAnnotations }}
+        {{ toYaml .Values.sbc.sip.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.global.affinity }}
+      affinity:
+        {{ toYaml .Values.global.affinity | default "" | nindent 8 }}
+      {{- end }}
+      nodeSelector:
+        {{ .Values.sbc.sip.nodeSelector.label }}: {{.Values.sbc.sip.nodeSelector.value | quote }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: {{ .Values.sbc.sip.toleration | quote }}
+          operator: "Exists"
+          effect: "NoSchedule"
+      initContainers:
+        {{- if and (.Values.sbc.ec2EipAllocator.enabled) (eq .Values.cloud "aws") }}
+        - name: ec2-eip-allocator
+          image: {{ .Values.sbc.ec2EipAllocator.image }}
+          securityContext:
+            privileged: true
+          env:
+            - name: AWS_EIP_NODE_GROUP_ROLE_KEY
+              value: {{ .Values.sbc.ec2EipAllocator.sipEipGroupRoleKey }}
+            - name: AWS_EIP_NODE_GROUP_ROLE
+              value: {{ .Values.sbc.ec2EipAllocator.sipEipGroupRole }}
+        {{- end }}
+        - image: kanisterio/mysql-sidecar:0.40.0
+          name: db-create-wait
+          command:
+            - sh 
+            - -c 
+            - |
+              until [ $(mysql -u {{ .Values.mysql.user }} -D {{ .Values.mysql.database }} -h mysql.{{ .Release.Namespace }} -p${MYSQL_PASSWORD} --protocol=tcp -N -e "select count(*) from system_information") -gt 0 ];
+              do 
+                sleep 10
+              done
+          env:
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+      containers:
+        - name: drachtio
+          image: {{ .Values.drachtio.image }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.drachtio.imagePullPolicy }}
+          args: 
+            - drachtio
+            - --loglevel
+            - {{ .Values.sbcSip.loglevel }}
+            - --cloud-deployment
+            - --sofia-loglevel
+            - {{ .Values.sbcSip.sofiaLoglevel | quote }}
+            - --homer
+            - heplify-server.{{ .Release.Namespace }}:9060
+            - --homer-id
+            - {{ .Values.drachtio.homerId | quote }}
+            - --reject-register-with-no-realm
+{{- if .Values.apiban.apiKey }}
+            - --blacklist-redis-address
+            - redis.{{ .Release.Namespace  }}
+            - --blacklist-redis-port
+            - {{ .Values.redis.port | quote }}
+            - --blacklist-refresh-secs
+            - {{ .Values.apiban.refreshInterval | quote }}
+            - --blacklist-redis-key
+            - {{ .Values.apiban.redisKey | quote }}
+{{- end }}
+          env:
+            - name: DRACHTIO_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: DRACHTIO_SECRET
+            - name: SOFIA_SEARCH_DOMAINS
+              value: "1"
+            - name: SOFIA_SRES_NO_CACHE
+              value: "1"
+            - name: CLOUD 
+              value: {{ required "cloud provider name" .Values.cloud | quote }}
+            - name: IMDSv2 
+              value: {{ .Values.awsUseIMDSv2 | quote }}
+            - name: LB_IMDS 
+              value: {{ .Values.aksUseIMDSv2 | quote }}
+            {{- if .Values.sbc.sip.ssl.enabled }}
+            - name: DRACHTIO_TLS_CERT_FILE
+              value: /etc/letsencrypt/tls.crt
+            - name: DRACHTIO_TLS_KEY_FILE
+              value: /etc/letsencrypt/tls.key
+            - name: DRACHTIO_TLS_CHAIN_FILE
+              value: /etc/letsencrypt/tls.crt
+            - name: TLS_PORT
+              value: "5061"
+            - name: WSS_PORT
+              value: "8443"
+            {{- end }}
+          ports:
+            - containerPort: 9022
+              protocol: TCP
+            - containerPort: 5060
+              protocol: UDP
+            - containerPort: 5060
+              protocol: TCP
+            {{- if .Values.sbc.sip.ssl.enabled }}
+            - containerPort: 5061
+              protocol: TCP
+            - containerPort: 8443
+              protocol: TCP
+            {{- end }}
+          resources: {}
+          volumeMounts:
+            - mountPath: /etc/drachtio.conf.xml
+              name: jambonz-sbc-sip-conf
+              subPath: drachtio.conf.xml
+            {{- if .Values.sbc.sip.ssl.enabled }}
+            - mountPath: /etc/letsencrypt/
+              name: drachtio-certs
+            {{- end }}
+        - name: sidecar
+          image: {{ .Values.sbcSipSidecar.image }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.sbcSipSidecar.imagePullPolicy }} 
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: K8S 
+              value: "1"
+            - name: JAMBONES_NETWORK_CIDR
+              value: "192.168.0.0/24,172.16.0.0/16,10.0.0.0/8"
+            - name: JAMBONES_REGBOT_CONTACT_USE_IP
+              value: "1"
+            - name: JAMBONES_LOGLEVEL
+              value: info
+            - name: JAMBONES_REDIS_HOST
+              value: redis.{{ .Release.Namespace }}
+            - name: JAMBONES_REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: JAMBONES_MYSQL_DATABASE
+              value: {{ .Values.mysql.database }}
+            - name: JAMBONES_MYSQL_HOST
+              value: mysql.{{ .Release.Namespace }}
+            - name: JAMBONES_MYSQL_USER
+              value: {{ .Values.mysql.user }}
+            - name: JAMBONES_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+            - name: JAMBONES_TIME_SERIES_HOST
+              value: influxdb.{{ .Release.Namespace }}
+            - name: ENABLE_METRICS
+              value: {{ default "0" .Values.stats.enabled  | quote }}
+            {{- if .Values.stats.enabled }}
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STATS_HOST
+              value: {{ .Values.stats.host }}.{{ .Release.Namespace }}
+            - name: STATS_PORT
+              value: {{ .Values.stats.port  | quote }}
+            - name: STATS_TAGS
+              value: "pod:$(K8S_POD_NAME)"
+            - name: STATS_PROTOCOL
+              value: {{ .Values.stats.protocol }}
+            - name: STATS_TELEGRAF
+              value: "1"
+            - name: STATS_SAMPLE_RATE
+              value:  {{ .Values.stats.sampleRate | quote }}
+            {{- end }}
+            - name: DRACHTIO_HOST
+              value: 127.0.0.1
+            - name: DRACHTIO_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: DRACHTIO_SECRET
+            - name: DRACHTIO_PORT
+              value: "9022"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: JWT_SECRET
+            - name: JAMBONZ_RECORD_WS_USERNAME
+              value: jambonz
+            - name: JAMBONZ_RECORD_WS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: JWT_SECRET
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+      restartPolicy: Always
+      volumes:
+      - name: jambonz-sbc-sip-conf
+        configMap:
+          name: jambonz-sbc-sip-conf
+          items:
+          - key: drachtio.conf.xml
+            path: drachtio.conf.xml
+      {{- if .Values.sbc.sip.ssl.enabled }}
+      - name: drachtio-certs
+        secret:
+          secretName: drachtio-secret
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+          defaultMode: 420
+      {{- end }}

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: webapp
+{{ include "common.labels" . | indent 4 }}
+  name: webapp
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  replicas: {{ default 1 .Values.webapp.replicas}}
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.webapp.podAnnotations }}
+        {{ toYaml .Values.webapp.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.global.affinity }}
+      affinity:
+        {{ toYaml .Values.global.affinity | default "" | nindent 8 }}
+      {{- end }}
+      {{- if .Values.webapp.nodeSelector }}
+      nodeSelector:
+        {{ .Values.webapp.nodeSelector.label }}: {{ .Values.webapp.nodeSelector.value | quote }}      
+      {{- end }}
+      containers:
+        - env:
+            - name: NODE_ENV
+              value: production
+            - name: API_BASE_URL
+              value: {{ if .Values.global.traefik.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.api.hostname }}/v1
+            {{- if .Values.webapp.disableRecording }}
+            - name: DISABLE_CALL_RECORDING
+              value: "true"
+            {{- end }}
+            - name: GF_SERVER_ROOT_URL
+              value: "/grafana"
+            - name: NODE_OPTIONS
+              value: '--openssl-legacy-provider'
+          image:  {{ .Values.webapp.image }}
+          imagePullPolicy: {{ .Values.webapp.imagePullPolicy }}
+          name: webapp
+          ports:
+            - containerPort: 3001
+          resources: {}
+      restartPolicy: Always

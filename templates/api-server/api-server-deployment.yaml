@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: api-server
+{{ include "common.labels" . | indent 4 }}
+  name: api-server
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  replicas: {{ default 1 .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      labels:
+        app: api-server
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.api.podAnnotations }}
+        {{ toYaml .Values.api.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.global.affinity }}
+      affinity:
+        {{ toYaml .Values.global.affinity | default "" | nindent 8 }}
+      {{- end }}
+      {{- if .Values.api.nodeSelector }}
+      nodeSelector:
+        {{ .Values.api.nodeSelector.label }}: {{ .Values.api.nodeSelector.value | quote }}      
+      {{- end }}
+      initContainers:
+        - image: kanisterio/mysql-sidecar:0.40.0
+          name: db-create-wait
+          command:
+            - sh 
+            - -c 
+            - |
+              until mysql -u {{ .Values.mysql.user }} -D {{ .Values.mysql.database }} -h mysql.{{ .Release.Namespace  }} -p${MYSQL_PASSWORD} --protocol=tcp -e "select count(*) from accounts";
+              do 
+                sleep 5
+              done
+          env:
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+      containers:
+        - name: api-server
+          image: {{ .Values.api.image }}
+          imagePullPolicy: {{ .Values.api.imagePullPolicy }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: HTTP_PORT
+              value: {{ .Values.api.httpPort | quote }}
+            - name: K8S 
+              value: "1"
+            - name: K8S_FEATURE_SERVER_SERVICE_NAME 
+              value: "feature-server"
+            - name: JAMBONES_LOGLEVEL
+              value: debug
+            - name: JAMBONES_TIME_SERIES_HOST 
+              value: influxdb.{{ .Release.Namespace  }}
+            - name: JAMBONES_TRUST_PROXY
+              value: "2"
+            - name: HOMER_BASE_URL
+              value: http://homer-webapp.{{ .Release.Namespace  }}
+{{- if .Values.global.cassandra.enabled }}
+            - name: JAEGER_BASE_URL
+              value: http://jaeger-query.{{ .Release.Namespace  }}:16686
+{{- else }}
+            - name: JAEGER_BASE_URL
+              value: http://jaeger.{{ .Release.Namespace  }}:16686
+{{- end }}
+            - name: HOMER_USERNAME
+              value: admin
+            - name: HOMER_PASSWORD
+              value: sipcapture
+            - name: ENABLE_METRICS
+              value: {{ default "0" .Values.stats.enabled  | quote }}
+            {{- if .Values.stats.enabled }}
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STATS_HOST
+              value: {{ .Values.stats.host }}.{{ .Release.Namespace  }}
+            - name: STATS_PORT
+              value: {{ .Values.stats.port  | quote }}
+            - name: STATS_TAGS
+              value: "pod:$(K8S_POD_NAME)"
+            - name: STATS_PROTOCOL
+              value: {{ .Values.stats.protocol }}
+            - name: STATS_TELEGRAF
+              value: "1"
+            - name: STATS_SAMPLE_RATE
+              value:  {{ .Values.stats.sampleRate | quote }}
+            {{- end }}
+            - name: JAMBONES_REDIS_HOST
+              value: redis.{{ .Release.Namespace  }}
+            - name: JAMBONES_REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: JAMBONES_MYSQL_HOST
+              value: mysql.{{ .Release.Namespace  }}
+            - name: JAMBONES_MYSQL_DATABASE
+              value: {{ .Values.mysql.database | quote }}
+            - name: JAMBONES_MYSQL_USER
+              value: {{ .Values.mysql.user | quote }}
+            - name: JAMBONES_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: MYSQL_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: JWT_SECRET
+            - name: JAMBONZ_RECORD_WS_USERNAME
+              value: jambonz
+            - name: JAMBONZ_RECORD_WS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jambonz-secrets
+                  key: JWT_SECRET
+            - name: JAMBONES_DISABLE_TTS_STREAMING
+              value: "1"
+          ports:
+            - containerPort: {{ .Values.api.httpPort }}
+          resources: {}
+      restartPolicy: Always

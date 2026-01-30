@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sbc-call-router
+  labels:
+    app: sbc-call-router
+{{ include "common.labels" . | indent 4 }}
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  replicas: {{ default 1 .Values.sbcCallRouter.replicas }}
+  selector:
+    matchLabels:
+      app: sbc-call-router
+  template:
+    metadata:
+      labels:
+        app: sbc-call-router
+      annotations:
+        {{- if .Values.global.podAnnotations }}
+        {{ toYaml .Values.global.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+        {{- if .Values.sbcCallRouter.podAnnotations }}
+        {{ toYaml .Values.sbcCallRouter.podAnnotations | default "" | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.global.affinity }}
+      affinity:
+        {{ toYaml .Values.global.affinity | default "" | nindent 8 }}
+      {{- end }}
+      {{- if .Values.sbcCallRouter.nodeSelector }}
+      nodeSelector:
+        {{ .Values.sbcCallRouter.nodeSelector.label }}: {{ .Values.sbcCallRouter.nodeSelector.value | quote }}      
+      {{- end }}
+      containers:
+        - name: sbc-call-router
+          image: {{ .Values.sbcCallRouter.image }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.sbcCallRouter.imagePullPolicy }} 
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: K8S 
+              value: "1"
+            - name: JAMBONES_LOGLEVEL
+              value: info
+            - name: K8S_SBC_INBOUND_SERVICE_NAME
+              value: sbc-inbound:4000
+            - name: K8S_SBC_OUTBOUND_SERVICE_NAME
+              value: sbc-outbound:4000
+            - name: HTTP_PORT
+              value: {{ .Values.sbcCallRouter.httpPort | quote }}
