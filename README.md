@@ -82,9 +82,8 @@ These ship with preset defaults. **Change them before any production deployment.
 
 ### Scaling
 
-| Value | Description | Default |
-|-------|-------------|---------|
-| `featureServer.replicas` | Number of feature-server (call processing) pods | `3` |
-| `api.replicas` | Number of API server pods | `1` |
-| `sbcInbound.replicas` | Number of inbound call-routing pods | `1` |
-| `sbcOutbound.replicas` | Number of outbound call-routing pods | `1` |
+The three components that matter for call capacity are:
+
+- **feature-server** — a Deployment that handles call processing. Scale by increasing `featureServer.replicas` (default: `3`).
+- **sbc-sip** — a DaemonSet that runs one pod per node in the SIP nodepool. Scale by adding nodes to the SIP nodepool.
+- **sbc-rtp** — a DaemonSet that runs one pod per node in the RTP nodepool. Scale by adding nodes to the RTP nodepool.
